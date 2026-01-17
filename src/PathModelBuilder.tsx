@@ -10,7 +10,9 @@ import {
   ChevronRight,
   ChevronLeft,
   AlertCircle,
-  Settings2
+  Settings2,
+  BookOpen,
+  Info
 } from "lucide-react";
 
 // --- Types ---
@@ -304,13 +306,39 @@ function parseCombinedMatrixText(text: string): { vars: VarName[]; cellMatrix: C
 
   for (const r of vars) {
     if (!cellMatrix[r]) throw new Error(`Missing row for "${r}". Row names must match header.`);
+    // NOTE: We don't throw here if cells are missing, we just initialize them if needed in the symmetry step
     for (const c of vars) {
-      if (!cellMatrix[r][c]) throw new Error(`Missing cell (${r}, ${c}).`);
+      if (!cellMatrix[r][c]) {
+         // Create empty cell if not parsed
+         cellMatrix[r][c] = { r: Number.NaN, n: Number.NaN };
+      }
     }
   }
 
   for (const v of vars) {
     cellMatrix[v][v] = { r: 1, n: Number.NaN };
+  }
+
+  // --- AUTO-SYMMETRY FIX ---
+  // If user pasted a lower triangular matrix, upper cells might be NaN. 
+  // We copy from lower to upper (or vice versa) to enforce symmetry immediately.
+  for (let i = 0; i < vars.length; i++) {
+    for (let j = i + 1; j < vars.length; j++) {
+      const r = vars[i];
+      const c = vars[j];
+      
+      const cellUpper = cellMatrix[r][c]; // (i,j)
+      const cellLower = cellMatrix[c][r]; // (j,i)
+
+      // If Upper is invalid but Lower is valid, copy Lower -> Upper
+      if ((!Number.isFinite(cellUpper.r)) && Number.isFinite(cellLower.r)) {
+         cellMatrix[r][c] = { r: cellLower.r, n: cellLower.n };
+      }
+      // If Lower is invalid but Upper is valid, copy Upper -> Lower
+      else if ((!Number.isFinite(cellLower.r)) && Number.isFinite(cellUpper.r)) {
+         cellMatrix[c][r] = { r: cellUpper.r, n: cellUpper.n };
+      }
+    }
   }
 
   return { vars, cellMatrix };
@@ -858,14 +886,12 @@ export default function PathModelBuilder() {
     active: false, varName: null, dx: 0, dy: 0,
   });
   
-  // FIX: Corrected function with right variable names
   const onNodeClick = (v: VarName) => {
     if (!connectFrom) { setConnectFrom(v); return; }
     if (connectFrom === v) { setConnectFrom(null); return; }
     
     // Only add edge in step 2
     if (step === 2) {
-      // Correct variable names used here
       if (connectFrom === v) return;
       if (edges.some((e) => e.from === connectFrom && e.to === v)) return;
       setEdges([...edges, { from: connectFrom, to: v }]);
@@ -948,15 +974,16 @@ export default function PathModelBuilder() {
           </div>
 
           <div className="flex items-center gap-3">
-		<a
-  		href="./MASEM_User_Manual.pdf"
-  		download
-  		className="inline-flex items-center gap-2 rounded-xl bg-slate-800 border border-slate-700 px-4 py-2 text-sm font-bold text-white shadow-md transition-all hover:bg-slate-700 hover:-translate-y-0.5 hover:shadow-lg"
-  		title="Download the user manual PDF"
-		>
-  		<Download size={14} />
-  		Download User Manual
-		</a>
+            <a
+              href="https://github.com/uflyy/masem-path-model-builder/raw/main/MASEM_User_Manual.pdf"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-3 py-1 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 hover:text-indigo-600 transition-all"
+              title="Download the user manual PDF"
+            >
+              <BookOpen size={14} />
+              User Manual
+            </a>
           </div>
         </div>
       </div>
@@ -967,15 +994,23 @@ export default function PathModelBuilder() {
           
           {step === 0 && (
             <div className="max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-               <div className="text-center mb-8">
+               <div className="text-center mb-6">
                   <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 mb-4">
                      <ListPlus size={24}/>
                   </div>
                   <h2 className="text-2xl font-bold mb-2">Configure Analysis Variables</h2>
                   <p className="text-slate-500">Select your base dataset and add any custom variables needed for your MASEM model.</p>
                </div>
+               
+               {/* NEW: Explainer Text */}
+               <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-4 mb-8 text-sm text-indigo-900 flex gap-3">
+                  <Info className="shrink-0 text-indigo-600 mt-0.5" size={18} />
+                  <div>
+                    <strong>Purpose of this tool:</strong> This tool is designed to add new variable correlations based on the existing 4-variable meta-analyzed correlation matrix from <em>So, Yang and Li (2025)</em>, generating a new Extended MASEM. The 4 base variables are pre-loaded.
+                  </div>
+               </div>
 
-               <div className="grid md:grid-cols-2 gap-8">
+               <div className="grid md:grid-cols-2 gap-8 mb-8">
                  <div className="space-y-4">
                     <label className="block text-sm font-semibold text-slate-700">Meta-analytical Dataset Preset</label>
                     <div className="relative">
@@ -1030,6 +1065,31 @@ export default function PathModelBuilder() {
                        </div>
                     </div>
                  </div>
+               </div>
+
+               {/* NEW: Live Variable Display */}
+               <div className="pt-6 border-t border-slate-100">
+                    <h3 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                       <CheckCircle2 size={16} className="text-emerald-500"/>
+                       Active Model Variables ({BASE_VARS.length + pendingCount})
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                       {/* Render Base Vars */}
+                       {BASE_VARS.map(v => (
+                          <span key={v} className="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                             {v}
+                          </span>
+                       ))}
+                       {/* Render Pending Vars (Real-time Preview) */}
+                       {pendingNames.slice(0, pendingCount).map((v, i) => {
+                          const name = v.trim() || `Variable ${i + 1}`;
+                          return (
+                            <span key={i} className="px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 animate-in fade-in zoom-in duration-300">
+                               {name}
+                            </span>
+                          );
+                       })}
+                    </div>
                </div>
             </div>
           )}
@@ -1105,7 +1165,7 @@ export default function PathModelBuilder() {
                             Paste matrix (lower triangular entries automatically filled for base variables).
                          </div>
                          <textarea 
-                           className="flex-1 w-full border border-slate-300 rounded-lg p-3 font-mono text-xs resize-none"
+                           className="flex-1 w-full border border-slate-300 rounded-lg p-3 font-mono text-xs resize-none h-[400px]"
                            value={matrixText}
                            onChange={e => setMatrixText(e.target.value)}
                            placeholder="Paste matrix here..."
