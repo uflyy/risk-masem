@@ -1,5 +1,5 @@
-import PathModelBuilder from "./PathModelBuilder";
+import RiskPathModelBuilder from "./RiskPathModelBuilder";
 
 export default function App() {
-  return <PathModelBuilder />;
+  return <RiskPathModelBuilder />;
 }
